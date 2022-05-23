@@ -1,0 +1,141 @@
+---
+title: "Sample Script"
+subtitle: "Parameter Estimation Demo"
+author: "Marie Bouffard"
+date: '2022-05-23'
+output:
+  html_document:
+    theme: cosmo
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+# Attach Packages
+library(tidyverse)
+library(janitor)
+library(here)
+library(lubridate)
+library(boot)
+library(gt)
+library(patchwork)
+library(broom)
+library(nlstools)
+
+# Read in data and wrangle
+fish_catch <- read.csv(here("Data", "fish_catch.csv"), col.names = c("year", "wild_catch", "farmed_fish", "total_fish_production")) %>% 
+  mutate(year = as.numeric(year)) %>%
+  mutate(wild_catch = as.numeric(wild_catch)) %>% 
+  slice(5:67)
+
+# Count up from year 0 at 1950
+catch_year <- fish_catch %>% 
+  mutate(start_year = year - min(year))
+
+```
+
+<style>
+div.blue { background-color:#e6f0ff; border-radius: 5px; padding: 20px;}
+</style>
+<div class = "blue">
+
+The following sample code comes from part of an assignment I completed for my Advanced Environmental Data Analysis course at the Bren School of Environmental Science and Management on 3/4/2021.
+
+</div>
+
+### Initial Parameter estimates
+
+**a.)** Exploratory plot of wild catch over time.
+
+```{r}
+
+# Exploratory plot
+
+ggplot(data = catch_year, aes(x = year, y = wild_catch)) +
+  geom_point(color = "aquamarine3") +
+  labs(
+    title = "Wild catch exploratory graph",
+    x = "Year",
+    y = "Global wild fish catch (million tons)"
+  ) +
+  theme_minimal()
+
+```
+
+**b.)** This trend looks like it is following logistic growth where $K$ is about 90 million tons and $P_o$ appears to be around 17 million tons.
+
+We can estimate $A$ at about 4.3 million tons using the equation $A=\frac{K-P_o}{P_o}$
+
+We can estimate the growth rate constant during the exponential phase by fitting a linear model and using the slope to estimate $k$.
+
+```{r}
+
+# filter for exponential section betweetn 1950 and 1990
+wild_catch_exp <- catch_year %>%
+  select(start_year, wild_catch) %>% 
+  filter(start_year < 40) %>%
+  mutate(ln_catch = log(wild_catch))
+
+# Linear model
+lm_k <- lm(ln_catch ~ start_year, data = wild_catch_exp)
+lm_k
+
+```
+
+This gives us our initial estimate for $k$, 0.035, along with our estimates for $K$ ~ 90 and $A$ ~ 4.3.
+
+### Nonlinear Least Squares
+
+```{r}
+
+# Model info with estimated starting parameter values
+wild_nls <- nls(wild_catch ~ K/(1 + A*exp(-r*start_year)),
+              data = catch_year,
+              start = list(K = 90, A = 4.3, r = 0.035),
+              trace = TRUE)
+
+summary(wild_nls)
+
+```
+
+**c.)** Parameter outcomes
+
+```{r}
+
+wild_out_tidy <- broom::tidy(wild_nls)
+
+wild_out_tidy
+
+```
+
+Wild catch model with estimated parameters:
+$$P(t) = \frac{100.27}{1+4.31e^{0.069t}}$$
+
+**d.)** Visualization of original data and model output
+
+```{r}
+
+# catch predictions
+catch_predict <- predict(wild_nls)
+
+# combine predictions and original data
+wild_complete <- data.frame(catch_year, catch_predict)
+
+# Plot together
+ggplot(data = wild_complete, aes(x = year, y = wild_catch)) +
+  geom_point(color = "aquamarine3") +
+  geom_line(aes(x = year, y = catch_predict), color = "aquamarine4") +
+    labs(
+    title = "Global Wild Fish Catch Model and Original Data",
+    x = "Year",
+    y = "Catch (million tons)"
+  ) +
+  theme_minimal()
+
+```
+
+***
+
+**Data Source**
+Global wild fish catch and aquaculture production, compiled by Earth Policy Institute with 1950-2010 from U.N. Food and Agriculture Organization (FAO), Global Capture Production and Global Aquaculture Production, electronic databases, at www.fao.org/fishery/topic/16140/en.
